@@ -1,0 +1,154 @@
+﻿@inject IJSRuntime JS
+@inject HttpClient Http
+@page "/"
+
+<PageTitle>Index</PageTitle>
+
+@inject IJSRuntime JS
+
+<h3>Crea la tua pizza</h3>
+
+<p>
+    <label>Nome:</label>
+    <input @bind="nomeUtente" placeholder="Inserisci il tuo nome" />
+</p>
+
+<!-- Tipi di Impasto -->
+<h4>Tipi di impasto</h4>
+<table class="table">
+    <tbody>
+        @foreach (var voce in impasti)
+        {
+            <tr>
+                <td>
+                    <input type="checkbox" @bind="voce.Selezionata" />
+                    <span style="margin-left: 0.5rem">@voce.Nome</span>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+<!-- Sughi -->
+<h4>Sughi</h4>
+<table class="table">
+    <tbody>
+        @foreach (var voce in sughi)
+        {
+            <tr>
+                <td>
+                    <input type="checkbox" @bind="voce.Selezionata" />
+                    <span style="margin-left: 0.5rem">@voce.Nome</span>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+<!-- Ingredienti -->
+<h4>Ingredienti</h4>
+<table class="table">
+    <tbody>
+        @foreach (var voce in ingredienti)
+        {
+            <tr>
+                <td>
+                    <input type="checkbox" @bind="voce.Selezionata" />
+                    <span style="margin-left: 0.5rem">@voce.Nome</span>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+<button class="btn btn-primary" @onclick="ConfermaESalva">Salva selezione in file</button>
+<button class="btn btn-success" @onclick="SalvaSuFirestore">Salva su Firestore</button>
+
+
+@code {
+    public class Voce
+    {
+        public string Nome { get; set; }
+        public bool Selezionata { get; set; }
+    }
+
+    private string nomeUtente = "";
+
+    private List<Voce> impasti = new()
+    {
+        new Voce { Nome = "Impasto Classico" },
+        new Voce { Nome = "Impasto Integrale" },
+        new Voce { Nome = "Impasto Senza Glutine" }
+    };
+    private List<Voce> sughi = new()
+    {
+        new Voce { Nome = "Pomodoro" },
+        new Voce { Nome = "Bianca" },
+        new Voce { Nome = "Pesto" }
+    };
+    private List<Voce> ingredienti = new()
+    {
+        new Voce { Nome = "Mozzarella" },
+        new Voce { Nome = "Prosciutto" },
+        new Voce { Nome = "Funghi" }
+    };
+
+    private async Task SalvaSelezione()
+    {
+        var selezionatiImpasti = impasti.Where(v => v.Selezionata).Select(v => v.Nome);
+        var selezionatiSughi = sughi.Where(v => v.Selezionata).Select(v => v.Nome);
+        var selezionatiIngredienti = ingredienti.Where(v => v.Selezionata).Select(v => v.Nome);
+
+        var contenuto = $"{nomeUtente}\n\nImpasti:\n- {string.Join("\n- ", selezionatiImpasti)}\n\nSughi:\n- {string.Join("\n- ", selezionatiSughi)}\n\nIngredienti:\n- {string.Join("\n- ", selezionatiIngredienti)}";
+        var bytes = System.Text.Encoding.UTF8.GetBytes(contenuto);
+        var base64 = Convert.ToBase64String(bytes);
+
+        string nomeFile = string.IsNullOrWhiteSpace(nomeUtente)
+            ? "selezione.txt"
+            : $"{nomeUtente.Replace(" ", "_")}_selezione.txt";
+
+        await JS.InvokeVoidAsync("scaricaFile", nomeFile, base64);
+    }
+
+    private async Task ConfermaESalva()
+    {
+        bool confermato = await JS.InvokeAsync<bool>("confirm", "Sei sicuro di voler salvare la selezione?");
+        if (confermato)
+        {
+            await SalvaSelezione();
+        }
+    }
+    private async Task SalvaSuFirestore()
+    {
+        var selezionatiImpasti = impasti.Where(v => v.Selezionata).Select(v => v.Nome);
+        var selezionatiSughi = sughi.Where(v => v.Selezionata).Select(v => v.Nome);
+        var selezionatiIngredienti = ingredienti.Where(v => v.Selezionata).Select(v => v.Nome);
+
+        var nuovoDocumento = new
+        {
+            fields = new
+            {
+                nomeUtente = new { stringValue = nomeUtente },
+                impasti = new { arrayValue = new { values = selezionatiImpasti.Select(v => new { stringValue = v }) } },
+                sughi = new { arrayValue = new { values = selezionatiSughi.Select(v => new { stringValue = v }) } },
+                ingredienti = new { arrayValue = new { values = selezionatiIngredienti.Select(v => new { stringValue = v }) } }
+            }
+        };
+        var json = System.Text.Json.JsonSerializer.Serialize(nuovoDocumento);
+        var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+        // ⚡️ MODIFICA CON IL TUO PROJECT-ID
+        var url = "https://firestore.googleapis.com/v1/projects/menu--pizze-ab6fe/databases/(default)/documents/selezioni";
+
+        var response = await Http.PostAsync(url, content);
+        if (response.IsSuccessStatusCode)
+        {
+            await JS.InvokeVoidAsync("alert", "✅ Selezione salvata correttamente su Firestore!");
+        }
+        else
+        {
+            await JS.InvokeVoidAsync("alert", $"❌ Errore nel salvataggio: {response.ReasonPhrase}");
+        }
+    }
+
+}
